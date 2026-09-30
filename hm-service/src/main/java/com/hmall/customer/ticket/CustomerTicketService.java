@@ -29,18 +29,6 @@ public class CustomerTicketService {
         return createValidated(conversationId, actor, reason, orderId, idempotencyKey);
     }
 
-    @Transactional
-    public CustomerTicket createInternal(String conversationId, Long userId,
-                                         String reason, Long orderId, String idempotencyKey) {
-        List<Map<String, Object>> rows = db.queryForList(
-                "SELECT user_id FROM customer_conversation WHERE id=?", conversationId);
-        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在");
-        Object owner = rows.get(0).get("user_id");
-        if (owner == null ? userId != null : userId == null || ((Number) owner).longValue() != userId)
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "会话不存在");
-        return createValidated(conversationId, new CustomerActor(userId, null), reason, orderId, idempotencyKey);
-    }
-
     private CustomerTicket createValidated(String conversationId, CustomerActor actor,
                                            String reason, Long orderId, String idempotencyKey) {
         if (reason == null || reason.isBlank() || reason.length() > 500
