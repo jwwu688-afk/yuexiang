@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 64" role="img" aria-labelledby="title description">
+  <title id="title">悦享商城</title>
+  <desc id="description">红色购物袋图标与深灰色悦享商城字标</desc>
+  <g transform="translate(4 5)">
+    <path d="M8 15h42l-3.5 36H11.5z" fill="#c81623"/>
+    <path d="M18 17c0-8 4.8-13 11-13s11 5 11 13" fill="none" stroke="#c81623" stroke-width="5" stroke-linecap="round"/>
+    <path d="M18 30l7 7 15-16" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="66" y="42" fill="#2f3033" font-family="Microsoft YaHei, PingFang SC, sans-serif" font-size="30" font-weight="700" letter-spacing="2">悦享商城</text>
+</svg>
