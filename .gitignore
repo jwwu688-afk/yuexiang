@@ -1,0 +1,14 @@
+.idea/
+**/target/
+**/__pycache__/
+.pytest_cache/
+.venv/
+.venvs/
+*.egg-info/
+*.pyc
+*.jks
+.env.local
+application-dev.yaml
+application-local.yaml
+data/
+logs/
