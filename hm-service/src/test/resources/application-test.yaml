@@ -6,13 +6,6 @@ spring:
     password:
   flyway:
     locations: classpath:db/test-migration
-  cloud:
-    discovery:
-      enabled: false
-    nacos:
-      discovery:
-        enabled: false
-
 hm:
   internal:
     service-secret: internal-test-secret

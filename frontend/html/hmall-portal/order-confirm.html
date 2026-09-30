@@ -187,7 +187,7 @@
             )
         },
         toPay() {
-          // 发送ajax请求到微服务执行：下单、扣库存
+          // 发送 AJAX 请求到商城服务执行：下单、扣库存
           let details = [];
           this.items.forEach(({itemId, num}) => {
             details.push({itemId, num})
