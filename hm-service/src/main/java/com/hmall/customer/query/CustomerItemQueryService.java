@@ -21,8 +21,9 @@ public class CustomerItemQueryService {
 
     public List<CustomerItemDTO> search(String key, String brand, String category, Integer minPrice,
             Integer maxPrice, Integer pageSize) {
-        if (minPrice != null && maxPrice != null && minPrice > maxPrice) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "最低价格不能高于最高价格");
+        if (minPrice != null && minPrice < 0 || maxPrice != null && maxPrice < 0
+                || minPrice != null && maxPrice != null && minPrice > maxPrice) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "价格范围无效");
         }
         int limit = pageSize == null ? 10 : Math.max(1, Math.min(MAX_PAGE_SIZE, pageSize));
         return repository.search(key, brand, category, minPrice, maxPrice, limit).stream()

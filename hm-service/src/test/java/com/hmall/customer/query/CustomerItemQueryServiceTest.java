@@ -61,6 +61,8 @@ class CustomerItemQueryServiceTest {
         assertThatThrownBy(() -> queries.search(null, null, null, 200, 100, 10))
                 .isInstanceOf(ResponseStatusException.class)
                 .satisfies(error -> assertThat(((ResponseStatusException) error).getStatus().value()).isEqualTo(400));
+        assertThatThrownBy(() -> queries.search(null, null, null, -1, null, 10))
+                .isInstanceOf(ResponseStatusException.class);
     }
 
     private static Item item(Long id, int status) {
