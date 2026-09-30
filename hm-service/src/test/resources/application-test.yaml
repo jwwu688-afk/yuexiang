@@ -20,3 +20,4 @@ hm:
     token-secret: local-test-token-secret-with-at-least-32-characters
     service-secret: local-test-agent-service-secret
     url: http://127.0.0.1:9
+    timeout-job-enabled: false

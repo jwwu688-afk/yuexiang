@@ -9,8 +9,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -146,6 +148,36 @@ public class CustomerConversationService {
         Integer next = db.queryForObject("SELECT COALESCE(MAX(sequence_no),0)+1 FROM customer_event WHERE run_id=?",
                 Integer.class, runId);
         appendEvent(runId, next == null ? 1 : next, "error", "客服服务暂时不可用，请稍后重试");
+    }
+
+    @Transactional
+    public int expirePendingRuns(Instant cutoff) {
+        List<String> candidates = db.queryForList(
+                "SELECT id FROM customer_run WHERE status='PENDING' AND updated_at<? ORDER BY updated_at LIMIT 100",
+                String.class, Timestamp.from(cutoff));
+        int expired = 0;
+        for (String runId : candidates) {
+            List<Map<String, Object>> rows = db.queryForList(
+                    "SELECT status,updated_at FROM customer_run WHERE id=? FOR UPDATE", runId);
+            if (rows.isEmpty() || !"PENDING".equals(rows.get(0).get("status"))
+                    || !isBefore(rows.get(0).get("updated_at"), cutoff)) {
+                continue;
+            }
+            Integer next = db.queryForObject(
+                    "SELECT COALESCE(MAX(sequence_no),0)+1 FROM customer_event WHERE run_id=?", Integer.class, runId);
+            appendEvent(runId, next == null ? 1 : next, "error", "客服响应超时，请重试或点击“转人工”");
+            expired++;
+        }
+        return expired;
+    }
+
+    private static boolean isBefore(Object value, Instant cutoff) {
+        if (value instanceof Timestamp) return ((Timestamp) value).toInstant().isBefore(cutoff);
+        if (value instanceof java.time.LocalDateTime) {
+            return ((java.time.LocalDateTime) value)
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant().isBefore(cutoff);
+        }
+        return false;
     }
 
     public Map<String, Object> history(String conversationId, CustomerActor actor) {

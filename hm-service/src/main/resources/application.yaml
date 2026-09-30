@@ -55,6 +55,8 @@ hm:
     url: ${HM_AGENT_URL:http://127.0.0.1:8001}
     connect-timeout: ${HM_AGENT_CONNECT_TIMEOUT:2s}
     read-timeout: ${HM_AGENT_READ_TIMEOUT:30s}
+    run-timeout: ${HM_AGENT_RUN_TIMEOUT:10m}
+    timeout-scan-delay-ms: ${HM_AGENT_TIMEOUT_SCAN_DELAY_MS:60000}
   auth:
     excludePaths:
       - /search/**
