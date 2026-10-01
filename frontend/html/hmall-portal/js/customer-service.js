@@ -27,6 +27,7 @@
   const seenRunIds = new Set();
   const answerRows = new Map();
   const sourceByRun = new Map();
+  const imageRenderer = window.CustomerServiceImages.createRunImageRenderer(document);
 
   const headers = (json = false) => {
     const result = {};
@@ -55,6 +56,7 @@
       answerRows.set(runId, row);
       const sources = sourceByRun.get(runId);
       if (sources) renderSources(runId, sources);
+      imageRenderer.bindRow(runId, row);
     }
     messages.scrollTop = messages.scrollHeight;
     return row;
@@ -125,6 +127,7 @@
     seenRunIds.clear();
     answerRows.clear();
     sourceByRun.clear();
+    imageRenderer.clear();
     for (const item of (history.messages || []).slice().reverse())
       message(item.role, item.content, item.role === 'assistant' ? item.runId : null);
     if (!history.messages || history.messages.length === 0) message('assistant', '你好！可以问我在售商品、你的订单和已有物流信息。');
@@ -132,6 +135,7 @@
     for (const event of (history.events || []).slice().reverse()) {
       try {
         if (event.type === 'sources') renderSources(event.runId, JSON.parse(event.data));
+        if (event.type === 'images') imageRenderer.receive(event.runId, JSON.parse(event.data));
         if (event.type === 'ticket') showTicket(JSON.parse(event.data));
         if (event.type === 'error') lastError = event.data;
         if (event.type === 'completed') lastError = null;
@@ -149,6 +153,7 @@
     session.lastEventId = eventId;
     save();
     if (event.type === 'sources') renderSources(event.runId, JSON.parse(event.data));
+    if (event.type === 'images') imageRenderer.receive(event.runId, JSON.parse(event.data));
     if (event.type === 'ticket') showTicket(JSON.parse(event.data));
     if (event.type === 'completed') message('assistant', event.data, event.runId);
     if (event.type === 'error') showNotice(event.data || '客服服务暂时不可用，请稍后重试。');
