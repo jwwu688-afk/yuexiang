@@ -154,3 +154,55 @@ def test_final_answer_requires_policy_evidence_and_persisted_ticket():
     handoff = finalize_answer("请转人工", "已创建工单", [], [])
     assert "点击“转人工”按钮" in handoff["answer"]
     assert "已创建" not in handoff["answer"]
+
+
+def test_final_answer_merges_catalog_and_manual_knowledge():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+    knowledge = [{"available": True, "answer": "开机后先把温度设置到 110℃。",
+                  "image_urls": ["http://127.0.0.1:9000/manual/panel.jpg"]}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "模型声称可以退款", [], facts, knowledge)
+
+    assert result["answer"].index("1299.00 元") < result["answer"].index("根据产品说明书")
+    assert "开机后先把温度设置到 110℃" in result["answer"]
+    assert "模型声称" not in result["answer"]
+    assert result["images"] == ["http://127.0.0.1:9000/manual/panel.jpg"]
+
+
+def test_rag_failure_preserves_catalog_facts():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+    knowledge = [{"available": False, "answer": "", "image_urls": [],
+                  "notice": "说明书知识库暂时不可用，请稍后重试或转人工。"}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "", [], facts, knowledge)
+
+    assert "HAK180 烫金机" in result["answer"]
+    assert "说明书知识库暂时不可用" in result["answer"]
+
+
+def test_catalog_failure_preserves_rag_answer():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"error": "商城查询服务暂时不可用，请稍后重试"}}]
+    knowledge = [{"available": True, "answer": "按住设置键调整温度。", "image_urls": []}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "", [], facts, knowledge)
+
+    assert "商城查询服务暂时不可用" in result["answer"]
+    assert "按住设置键调整温度" in result["answer"]
+
+
+def test_model_operational_claim_is_not_added_to_rag_answer():
+    from app.main import finalize_answer
+    knowledge = [{"available": True, "answer": "断电后再清洁设备。", "image_urls": []}]
+
+    result = finalize_answer("怎么清洁？", "我已经替你退款并创建工单", [], [], knowledge)
+
+    assert "断电后再清洁设备" in result["answer"]
+    assert "退款" not in result["answer"]
+    assert "创建工单" not in result["answer"]
