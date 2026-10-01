@@ -231,3 +231,40 @@ def test_model_operational_claim_is_not_added_to_rag_answer():
     assert "断电后再清洁设备" in result["answer"]
     assert "退款" not in result["answer"]
     assert "创建工单" not in result["answer"]
+
+
+@pytest.mark.parametrize("message", ["它怎么安装？", "怎么安装？", "温度怎么设置？", "这机器怎么调温度？"])
+def test_vague_manual_question_emits_product_model_clarification(monkeypatch, message):
+    import asyncio
+    import app.main as main
+    from app.knowledge_tools import make_product_clarification_tool
+
+    async def fake_to_thread(function, request):
+        clarification_states = []
+        make_product_clarification_tool(clarification_states).invoke({})
+        return main.finalize_answer(request.message, "请提供型号", [], [], [], clarification_states)
+
+    sent = []
+
+    async def fake_callback(request, sequence, event_type, data):
+        sent.append((sequence, event_type, data))
+
+    monkeypatch.setattr(main.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(main, "_callback", fake_callback)
+    asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
+                                           message=message, delegationToken="signed")))
+
+    assert sent == [(1, "completed", "请提供具体产品名称和型号，我再查询对应说明书。")]
+
+
+def test_product_clarification_is_appended_to_existing_catalog_facts():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+
+    result = finalize_answer("列出在售商品，它怎么安装？", "", [], facts, [],
+                             [{"needs_product_clarification": True}])
+
+    assert "HAK180 烫金机" in result["answer"]
+    assert "请提供具体产品名称和型号" in result["answer"]

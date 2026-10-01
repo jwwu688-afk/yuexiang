@@ -13,7 +13,7 @@ def test_core_eval_cases_define_authorization_and_verifiable_facts():
                 "规则来源", "规则冲突", "转人工确认", "产品知识", "混合咨询", "型号澄清"}
     assert required.issubset({case["category"] for case in cases})
     for case in cases:
-        if case["category"] in {"转人工确认", "型号澄清"}:
+        if case["category"] == "转人工确认":
             assert case["expected_tools"] == []
         else:
             assert case["expected_tools"]
@@ -24,4 +24,4 @@ def test_core_eval_cases_define_authorization_and_verifiable_facts():
             assert not any("order" in tool or "logistics" in tool for tool in tool_names_for_request(False))
     assert "search_product_knowledge" in tool_names_for_request(False)
     clarification = next(case for case in cases if case["category"] == "型号澄清")
-    assert clarification["expected_tools"] == []
+    assert clarification["expected_tools"] == ["request_product_model"]

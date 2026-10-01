@@ -44,6 +44,7 @@ def test_product_knowledge_tool_is_available_without_expanding_permissions(monke
 
     assert "search_product_knowledge" in tool_names_for_request(False)
     assert "search_product_knowledge" in [tool.name for tool in guest["tools"]]
+    assert "request_product_model" in [tool.name for tool in guest["tools"]]
     assert "search_product_knowledge" in [tool.name for tool in authenticated["tools"]]
     assert any(agent["name"] == "manual_specialist" for agent in guest["subagents"])
     assert "refund" not in [tool.name for tool in guest["tools"]]
