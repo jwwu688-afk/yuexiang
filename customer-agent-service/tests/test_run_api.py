@@ -65,6 +65,7 @@ def test_source_event_precedes_completed_answer(monkeypatch):
     async def fake_to_thread(function, request):
         return {"answer": "已创建排队工单", "sources": [{"policyId": 5, "version": 2,
                 "title": "退货规则", "effectiveFrom": "2026-09-01T00:00:00"}],
+                "images": ["http://127.0.0.1:9000/manual/panel.jpg"],
                 "ticket": {"ticketId": "ticket-1", "status": "QUEUED"}}
 
     sent = []
@@ -77,7 +78,31 @@ def test_source_event_precedes_completed_answer(monkeypatch):
     asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
                                           message="请转人工", delegationToken="signed")))
     assert [(sequence, event_type) for sequence, event_type, _ in sent] == [
-        (1, "sources"), (2, "completed")]
+        (1, "sources"), (2, "images"), (3, "completed")]
+    assert json.loads(sent[1][2]) == ["http://127.0.0.1:9000/manual/panel.jpg"]
+
+
+def test_image_event_precedes_completed_answer(monkeypatch):
+    import asyncio
+    import app.main as main
+
+    async def fake_to_thread(function, request):
+        return {"answer": "说明书答案", "sources": [],
+                "images": ["http://127.0.0.1:9000/manual/panel.jpg"]}
+
+    sent = []
+
+    async def fake_callback(request, sequence, event_type, data):
+        sent.append((sequence, event_type, data))
+
+    monkeypatch.setattr(main.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(main, "_callback", fake_callback)
+    asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
+                                           message="怎么安装", delegationToken="signed")))
+
+    assert [(sequence, event_type) for sequence, event_type, _ in sent] == [
+        (1, "images"), (2, "completed")]
+    assert json.loads(sent[0][2]) == ["http://127.0.0.1:9000/manual/panel.jpg"]
 
 
 def test_agent_run_never_emits_ticket_event(monkeypatch):

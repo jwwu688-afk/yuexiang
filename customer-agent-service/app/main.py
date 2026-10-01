@@ -208,6 +208,9 @@ async def process_run(request: RunRequest):
         if result["sources"]:
             await _callback(request, sequence, "sources", json.dumps(result["sources"], ensure_ascii=False))
             sequence += 1
+        if result.get("images"):
+            await _callback(request, sequence, "images", json.dumps(result["images"], ensure_ascii=False))
+            sequence += 1
         await _callback(request, sequence, "completed", result["answer"])
     except ModelUnavailable:
         await _callback(request, sequence, "error", "客服模型暂时不可用，请稍后重试或转人工")
