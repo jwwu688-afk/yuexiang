@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from app.agent import build_agent
 from app.java_client import JavaClient
+from app.rag_client import RagClient
 
 load_dotenv(Path(__file__).parents[1] / ".env.local")
 
@@ -82,20 +83,34 @@ def _invoke(request: RunRequest) -> dict:
     java = JavaClient(os.environ.get("HM_JAVA_BASE_URL", "http://127.0.0.1:8080"),
                       request.delegationToken,
                       correlation_id=request.runId)
+    allowed_origins = tuple(value.strip() for value in os.environ.get(
+        "HM_RAG_IMAGE_ALLOWED_ORIGINS",
+        "http://127.0.0.1:9000,http://localhost:9000").split(",") if value.strip())
+    rag = RagClient(
+        os.environ.get("HM_RAG_BASE_URL", "http://127.0.0.1:8011"),
+        float(os.environ.get("HM_RAG_TIMEOUT_SECONDS", "120")),
+        allowed_origins,
+    )
     checkpoint_path = Path(os.environ.get("HM_AGENT_CHECKPOINT_DB", "data/customer-agent-checkpoints.sqlite3"))
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     source_states: list[dict] = []
     fact_states: list[dict] = []
+    knowledge_states: list[dict] = []
+    clarification_states: list[dict] = []
     with SqliteSaver.from_conn_string(str(checkpoint_path)) as saver:
         agent = build_agent(model, java, authenticated, request.message, checkpointer=saver,
                             conversation_id=request.conversationId, run_id=request.runId,
                             source_collector=source_states,
-                            fact_collector=fact_states)
+                            fact_collector=fact_states,
+                            rag_client=rag,
+                            knowledge_collector=knowledge_states,
+                            clarification_collector=clarification_states)
         result = agent.invoke({"messages": [{"role": "user", "content": request.message}]},
                               config={"configurable": {"thread_id": request.conversationId}})
         content = result["messages"][-1].content
         answer = content if isinstance(content, str) else str(content)
-    return finalize_answer(request.message, answer, source_states, fact_states)
+    return finalize_answer(request.message, answer, source_states, fact_states, knowledge_states,
+                           clarification_states)
 
 
 def format_fact(state: dict) -> str:
@@ -125,11 +140,26 @@ def format_fact(state: dict) -> str:
 
 
 def finalize_answer(message: str, answer: str, source_states: list[dict],
-                    fact_states: list[dict] | None = None) -> dict:
+                    fact_states: list[dict] | None = None,
+                    knowledge_states: list[dict] | None = None,
+                    clarification_states: list[dict] | None = None) -> dict:
     sources = list({(source.get("policyId"), source.get("version")): source
                     for state in source_states for source in state.get("sources", [])}.values())
     uncertain = next((state for state in source_states if state.get("needs_handoff")), None)
     parts = [line for state in (fact_states or []) if (line := format_fact(state))]
+    images = []
+    has_knowledge_answer = False
+    for state in knowledge_states or []:
+        if state.get("available") and state.get("answer"):
+            has_knowledge_answer = True
+            parts.append("根据产品说明书：" + state["answer"].strip())
+        elif state.get("notice"):
+            parts.append(state["notice"])
+        for url in state.get("image_urls") or []:
+            if url not in images:
+                images.append(url)
+            if len(images) == 5:
+                break
     if len(sources) == 1 and not uncertain:
         source = sources[0]
         parts.append(f"根据已发布规则《{source['title']}》（政策 {source['policyId']}，"
@@ -138,10 +168,13 @@ def finalize_answer(message: str, answer: str, source_states: list[dict],
         parts.append("检索到多条可能相关的规则，当前结论不确定；建议转人工核实。")
     if uncertain:
         parts.append(uncertain["notice"])
+    if not has_knowledge_answer and any(state.get("needs_product_clarification")
+                                        for state in (clarification_states or [])):
+        parts.append("请提供具体产品名称和型号，我再查询对应说明书。")
     if not parts:
         parts.append("尚未取得可核实的商城数据，无法确认答案；如需人工处理，请点击“转人工”按钮确认提交。")
     # 模型只决定调用哪些受限工具；对外文本由可信工具结果生成，不转发模型自由文本。
-    return {"answer": "\n".join(parts), "sources": sources}
+    return {"answer": "\n".join(parts), "sources": sources, "images": images}
 
 
 def _verified_claims(token: str) -> dict:
@@ -183,6 +216,9 @@ async def process_run(request: RunRequest):
         result = await asyncio.to_thread(_invoke, request)
         if result["sources"]:
             await _callback(request, sequence, "sources", json.dumps(result["sources"], ensure_ascii=False))
+            sequence += 1
+        if result.get("images"):
+            await _callback(request, sequence, "images", json.dumps(result["images"], ensure_ascii=False))
             sequence += 1
         await _callback(request, sequence, "completed", result["answer"])
     except ModelUnavailable:

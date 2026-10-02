@@ -1,5 +1,7 @@
 package com.hmall.customer.chat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.HttpStatus;
@@ -9,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
+import java.net.URI;
 import java.sql.Timestamp;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -23,6 +26,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CustomerConversationService {
     private final JdbcTemplate db;
+    private final ObjectMapper json;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     public static String hashGuestKey(String key) {
@@ -128,8 +132,10 @@ public class CustomerConversationService {
                 Integer.class, runId);
         try { requireNextSequence(last == null ? 0 : last, sequence); }
         catch (IllegalArgumentException e) { throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage()); }
-        if (!List.of("answer", "sources", "ticket", "completed", "error").contains(type) || data == null || data.length() > 20000)
+        if (!List.of("answer", "sources", "ticket", "images", "completed", "error").contains(type)
+                || data == null || data.length() > 20000)
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "事件无效");
+        if ("images".equals(type)) validateImages(data);
         db.update("INSERT INTO customer_event(run_id,sequence_no,event_type,data) VALUES(?,?,?,?)",
                 runId, sequence, type, data);
         Long id = db.queryForObject("SELECT id FROM customer_event WHERE run_id=? AND sequence_no=?",
@@ -142,6 +148,25 @@ public class CustomerConversationService {
             db.update("UPDATE customer_run SET status='FAILED',updated_at=NOW(6) WHERE id=?", runId);
         }
         return id == null ? 0 : id;
+    }
+
+    private void validateImages(String data) {
+        try {
+            JsonNode root = json.readTree(data);
+            if (!root.isArray() || root.size() < 1 || root.size() > 5)
+                throw new IllegalArgumentException("图片数量无效");
+            for (JsonNode node : root) {
+                if (!node.isTextual() || node.textValue().isBlank() || node.textValue().length() > 2048)
+                    throw new IllegalArgumentException("图片地址无效");
+                URI uri = URI.create(node.textValue());
+                String scheme = uri.getScheme();
+                if (scheme == null || uri.getHost() == null
+                        || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)))
+                    throw new IllegalArgumentException("图片地址无效");
+            }
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "图片事件无效");
+        }
     }
 
     public void failRun(String runId) {

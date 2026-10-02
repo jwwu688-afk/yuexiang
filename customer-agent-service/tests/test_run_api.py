@@ -65,6 +65,7 @@ def test_source_event_precedes_completed_answer(monkeypatch):
     async def fake_to_thread(function, request):
         return {"answer": "已创建排队工单", "sources": [{"policyId": 5, "version": 2,
                 "title": "退货规则", "effectiveFrom": "2026-09-01T00:00:00"}],
+                "images": ["http://127.0.0.1:9000/manual/panel.jpg"],
                 "ticket": {"ticketId": "ticket-1", "status": "QUEUED"}}
 
     sent = []
@@ -77,7 +78,31 @@ def test_source_event_precedes_completed_answer(monkeypatch):
     asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
                                           message="请转人工", delegationToken="signed")))
     assert [(sequence, event_type) for sequence, event_type, _ in sent] == [
-        (1, "sources"), (2, "completed")]
+        (1, "sources"), (2, "images"), (3, "completed")]
+    assert json.loads(sent[1][2]) == ["http://127.0.0.1:9000/manual/panel.jpg"]
+
+
+def test_image_event_precedes_completed_answer(monkeypatch):
+    import asyncio
+    import app.main as main
+
+    async def fake_to_thread(function, request):
+        return {"answer": "说明书答案", "sources": [],
+                "images": ["http://127.0.0.1:9000/manual/panel.jpg"]}
+
+    sent = []
+
+    async def fake_callback(request, sequence, event_type, data):
+        sent.append((sequence, event_type, data))
+
+    monkeypatch.setattr(main.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(main, "_callback", fake_callback)
+    asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
+                                           message="怎么安装", delegationToken="signed")))
+
+    assert [(sequence, event_type) for sequence, event_type, _ in sent] == [
+        (1, "images"), (2, "completed")]
+    assert json.loads(sent[0][2]) == ["http://127.0.0.1:9000/manual/panel.jpg"]
 
 
 def test_agent_run_never_emits_ticket_event(monkeypatch):
@@ -154,3 +179,92 @@ def test_final_answer_requires_policy_evidence_and_persisted_ticket():
     handoff = finalize_answer("请转人工", "已创建工单", [], [])
     assert "点击“转人工”按钮" in handoff["answer"]
     assert "已创建" not in handoff["answer"]
+
+
+def test_final_answer_merges_catalog_and_manual_knowledge():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+    knowledge = [{"available": True, "answer": "开机后先把温度设置到 110℃。",
+                  "image_urls": ["http://127.0.0.1:9000/manual/panel.jpg"]}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "模型声称可以退款", [], facts, knowledge)
+
+    assert result["answer"].index("1299.00 元") < result["answer"].index("根据产品说明书")
+    assert "开机后先把温度设置到 110℃" in result["answer"]
+    assert "模型声称" not in result["answer"]
+    assert result["images"] == ["http://127.0.0.1:9000/manual/panel.jpg"]
+
+
+def test_rag_failure_preserves_catalog_facts():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+    knowledge = [{"available": False, "answer": "", "image_urls": [],
+                  "notice": "说明书知识库暂时不可用，请稍后重试或转人工。"}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "", [], facts, knowledge)
+
+    assert "HAK180 烫金机" in result["answer"]
+    assert "说明书知识库暂时不可用" in result["answer"]
+
+
+def test_catalog_failure_preserves_rag_answer():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"error": "商城查询服务暂时不可用，请稍后重试"}}]
+    knowledge = [{"available": True, "answer": "按住设置键调整温度。", "image_urls": []}]
+
+    result = finalize_answer("多少钱，温度怎么设置？", "", [], facts, knowledge)
+
+    assert "商城查询服务暂时不可用" in result["answer"]
+    assert "按住设置键调整温度" in result["answer"]
+
+
+def test_model_operational_claim_is_not_added_to_rag_answer():
+    from app.main import finalize_answer
+    knowledge = [{"available": True, "answer": "断电后再清洁设备。", "image_urls": []}]
+
+    result = finalize_answer("怎么清洁？", "我已经替你退款并创建工单", [], [], knowledge)
+
+    assert "断电后再清洁设备" in result["answer"]
+    assert "退款" not in result["answer"]
+    assert "创建工单" not in result["answer"]
+
+
+@pytest.mark.parametrize("message", ["它怎么安装？", "怎么安装？", "温度怎么设置？", "这机器怎么调温度？"])
+def test_vague_manual_question_emits_product_model_clarification(monkeypatch, message):
+    import asyncio
+    import app.main as main
+    from app.knowledge_tools import make_product_clarification_tool
+
+    async def fake_to_thread(function, request):
+        clarification_states = []
+        make_product_clarification_tool(clarification_states).invoke({})
+        return main.finalize_answer(request.message, "请提供型号", [], [], [], clarification_states)
+
+    sent = []
+
+    async def fake_callback(request, sequence, event_type, data):
+        sent.append((sequence, event_type, data))
+
+    monkeypatch.setattr(main.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(main, "_callback", fake_callback)
+    asyncio.run(main.process_run(RunRequest(conversationId="conv-1", runId="run-1",
+                                           message=message, delegationToken="signed")))
+
+    assert sent == [(1, "completed", "请提供具体产品名称和型号，我再查询对应说明书。")]
+
+
+def test_product_clarification_is_appended_to_existing_catalog_facts():
+    from app.main import finalize_answer
+    facts = [{"kind": "items", "value": {"items": [
+        {"id": 7, "name": "HAK180 烫金机", "price": 129900}
+    ]}}]
+
+    result = finalize_answer("列出在售商品，它怎么安装？", "", [], facts, [],
+                             [{"needs_product_clarification": True}])
+
+    assert "HAK180 烫金机" in result["answer"]
+    assert "请提供具体产品名称和型号" in result["answer"]

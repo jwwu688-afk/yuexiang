@@ -52,4 +52,51 @@ class CustomerConversationIntegrationTest {
         assertEquals(3, conversations.events(id, actor, 0).size());
         assertEquals(3, ((java.util.List<?>) conversations.history(id, actor).get("events")).size());
     }
+
+    @Test
+    void images_event_is_persisted_before_completion() {
+        String id = (String) conversations.create(new CustomerActor(1L, null)).get("conversationId");
+        CustomerActor actor = new CustomerActor(1L, null);
+        String runId = (String) conversations.submit(id, actor, "怎么安装", "images-key").get("runId");
+
+        conversations.appendEvent(runId, 1, "images",
+                "[\"http://127.0.0.1:9000/manual/panel.jpg\"]");
+        conversations.appendEvent(runId, 2, "completed", "说明书答案");
+
+        java.util.List<Map<String, Object>> events = conversations.events(id, actor, 0);
+        assertEquals(2, events.size());
+        assertEquals("images", events.get(0).get("type"));
+        assertEquals("completed", events.get(1).get("type"));
+    }
+
+    @Test
+    void images_event_rejects_non_array_unsafe_or_excessive_urls() {
+        String id = (String) conversations.create(new CustomerActor(1L, null)).get("conversationId");
+        CustomerActor actor = new CustomerActor(1L, null);
+        String runId = (String) conversations.submit(id, actor, "怎么安装", "invalid-images-key").get("runId");
+        String[] invalid = {
+                "{\"url\":\"http://127.0.0.1:9000/a.jpg\"}",
+                "[\"javascript:alert(1)\"]",
+                "[\"http://img/1.jpg\",\"http://img/2.jpg\",\"http://img/3.jpg\",\"http://img/4.jpg\",\"http://img/5.jpg\",\"http://img/6.jpg\"]"
+        };
+
+        for (String data : invalid) {
+            ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                    () -> conversations.appendEvent(runId, 1, "images", data));
+            assertEquals(HttpStatus.BAD_REQUEST.value(), error.getRawStatusCode());
+        }
+    }
+
+    @Test
+    void duplicate_images_sequence_is_idempotent() {
+        String id = (String) conversations.create(new CustomerActor(1L, null)).get("conversationId");
+        CustomerActor actor = new CustomerActor(1L, null);
+        String runId = (String) conversations.submit(id, actor, "怎么安装", "duplicate-images-key").get("runId");
+        String data = "[\"https://images.example/manual.jpg\"]";
+
+        long first = conversations.appendEvent(runId, 1, "images", data);
+
+        assertEquals(first, conversations.appendEvent(runId, 1, "images", data));
+        assertEquals(1, conversations.events(id, actor, 0).size());
+    }
 }
